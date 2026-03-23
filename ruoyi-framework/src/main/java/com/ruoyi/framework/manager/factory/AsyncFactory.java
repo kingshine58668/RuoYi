@@ -1,23 +1,25 @@
 package com.ruoyi.framework.manager.factory;
 
+import java.io.ByteArrayOutputStream;
+import java.io.ObjectOutputStream;
 import java.util.TimerTask;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import com.ruoyi.common.constant.Constants;
+import com.ruoyi.common.core.session.OnlineSession;
 import com.ruoyi.common.utils.AddressUtils;
 import com.ruoyi.common.utils.LogUtils;
 import com.ruoyi.common.utils.ServletUtils;
 import com.ruoyi.common.utils.ShiroUtils;
 import com.ruoyi.common.utils.StringUtils;
+import com.ruoyi.common.utils.http.UserAgentUtils;
 import com.ruoyi.common.utils.spring.SpringUtils;
-import com.ruoyi.framework.shiro.session.OnlineSession;
 import com.ruoyi.system.domain.SysLogininfor;
 import com.ruoyi.system.domain.SysOperLog;
 import com.ruoyi.system.domain.SysUserOnline;
 import com.ruoyi.system.service.ISysOperLogService;
 import com.ruoyi.system.service.ISysUserOnlineService;
 import com.ruoyi.system.service.impl.SysLogininforServiceImpl;
-import eu.bitwalker.useragentutils.UserAgent;
 
 /**
  * 异步工厂（产生任务用）
@@ -54,8 +56,21 @@ public class AsyncFactory
                 online.setBrowser(session.getBrowser());
                 online.setOs(session.getOs());
                 online.setStatus(session.getStatus());
+                // 序列化 OnlineSession，重启后可从 DB 恢复会话
+                try
+                {
+                    ByteArrayOutputStream bos = new ByteArrayOutputStream();
+                    ObjectOutputStream oos = new ObjectOutputStream(bos);
+                    oos.writeObject(session);
+                    oos.close();
+                    online.setSessionData(bos.toByteArray());
+                }
+                catch (Exception e)
+                {
+                    // 序列化失败不影响正常流程，仅记录日志
+                    LoggerFactory.getLogger(AsyncFactory.class).warn("serialize OnlineSession failed", e);
+                }
                 SpringUtils.getBean(ISysUserOnlineService.class).saveOnline(online);
-
             }
         };
     }
@@ -91,7 +106,7 @@ public class AsyncFactory
      */
     public static TimerTask recordLogininfor(final String username, final String status, final String message, final Object... args)
     {
-        final UserAgent userAgent = UserAgent.parseUserAgentString(ServletUtils.getRequest().getHeader("User-Agent"));
+        final String userAgent = ServletUtils.getRequest().getHeader("User-Agent");
         final String ip = ShiroUtils.getIp();
         return new TimerTask()
         {
@@ -108,9 +123,9 @@ public class AsyncFactory
                 // 打印信息到日志
                 sys_user_logger.info(s.toString(), args);
                 // 获取客户端操作系统
-                String os = userAgent.getOperatingSystem().getName();
+                String os = UserAgentUtils.getOperatingSystem(userAgent);
                 // 获取客户端浏览器
-                String browser = userAgent.getBrowser().getName();
+                String browser = UserAgentUtils.getBrowser(userAgent);
                 // 封装对象
                 SysLogininfor logininfor = new SysLogininfor();
                 logininfor.setLoginName(username);
